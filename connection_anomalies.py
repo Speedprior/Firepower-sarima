@@ -93,17 +93,24 @@ def collateDevices():
 def modelTraffic():
     deviceRecords,devices = collateDevices()
     deviceModels = {}
+    timeStamps = []
     for device in devices:
-        lastStamp = deviceRecords[device].index[-1]
-        start = lastStamp - timedelta(days=3)  
+        timeStamps.append(deviceRecords[device].index[-1])
+    lastStamp = max(timeStamps)
+    for device in devices:
+        deviceLastStamp = deviceRecords[device].index[-1]
+        if deviceLastStamp != lastStamp:
+            print(device + ": Timestamp discrepancy")
+        start = deviceLastStamp - timedelta(days=3)  
         model = autoSarimax(deviceRecords[device]['Initiator Bytes'])
         pred = model['model'].get_prediction(start=start)
         pred_ci = pred.conf_int()
         excessBytes = pred_ci['upper Initiator Bytes'].lt(deviceRecords[device]['Initiator Bytes'])
         excessBytes = deviceRecords[device][excessBytes] - pred_ci['upper Initiator Bytes'][excessBytes]
         deviceModels[device] = {'model':model,'pred':pred,'pred_ci':pred_ci,\
-                                'time':lastStamp,'excess':excessBytes}
-    return deviceModels,deviceRecords,devices,start
+                                'time':deviceLastStamp,'excess':excessBytes,\
+                                'start':start}
+    return deviceModels,deviceRecords,devices,lastStamp - timedelta(days=3)
  
 #Build the plots and record the excess bytes
 def graphPredictions():
@@ -113,13 +120,14 @@ def graphPredictions():
     devicePosition = 0
     for column in (0,1):
         for row in range(0,rows):
-            if len(devices) <= devicePosition:
+            if devicePosition < len(devices):
                 device = devices[devicePosition]
                 devicePosition = devicePosition + 1
+                start = deviceModels[device]['start']
                 lower = deviceModels[device]['pred_ci']['lower Initiator Bytes'][start:]
                 upper = deviceModels[device]['pred_ci']['upper Initiator Bytes'][start:]
                 ax[row][column].plot(deviceRecords[device]['Initiator Bytes'][start:],color="Orange")
-                ax[row][column].fill_between(deviceRecords[device][start:].index,lower[start:],upper[start:])
+                ax[row][column].fill_between(deviceRecords[device][start:].index,lower[start:],upper[start:],alpha=0.3)
                 ax[row][column].set_title(device)
     fig.tight_layout()
     reportOutputPath = getDirectoryPath("Path to save reports")
@@ -127,7 +135,6 @@ def graphPredictions():
     deviceDF = pd.DataFrame(deviceModels)
     deviceDF.to_csv(reportOutputPath + "/" + \
                 start.strftime("%Y-%h%d%H") + "_excess_traffic.csv")
-
 def main():
     graphPredictions()
  
